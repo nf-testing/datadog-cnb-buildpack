@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# CNB bin/detect <build-dir>
+#
+# Always passes. Opt-in is controlled by listing this buildpack in the
+# Northflank buildpack locators (or pack --buildpack). Outputs an empty build
+# plan (valid per the CNB spec — we require nothing from other buildpacks and
+# provide no typed outputs).
+set -euo pipefail
+
+echo "Datadog Agent" >&2
+exit 0

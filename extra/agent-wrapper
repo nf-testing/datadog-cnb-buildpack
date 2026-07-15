@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Self-contained wrapper so `agent-wrapper status` works from any exec session
+# (re-establishes PYTHONPATH/LD_LIBRARY_PATH the agent binary needs).
+set -euo pipefail
+
+APT_DIR="$HOME/.apt"
+DD_DIR="$APT_DIR/opt/datadog-agent"
+DD_BIN_DIR="$DD_DIR/bin/agent"
+DATADOG_CONF="$APT_DIR/etc/datadog-agent/datadog.yaml"
+PYTHON_DIR=$(find "$DD_DIR/embedded/lib/" -maxdepth 1 -type d -regex ".*/python[2-3]\.[0-9]+" -printf "%f")
+export PYTHONPATH="$DD_DIR/embedded/lib:$DD_DIR/embedded/lib/$PYTHON_DIR:$DD_DIR/embedded/lib/$PYTHON_DIR/site-packages"
+export LD_LIBRARY_PATH="$DD_DIR/embedded/lib:$APT_DIR/usr/lib/x86_64-linux-gnu:$APT_DIR/usr/lib"
+exec "$DD_BIN_DIR"/agent -c "$DATADOG_CONF" "$@"

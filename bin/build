@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# CNB bin/build — installs the Datadog Agent 7.x and writes .profile.d/datadog.sh.
+# Minimal: no APM, no process agent, no log collection, no DB integrations.
+# Just core system checks (cpu, memory, disk).
+#
+# CNB contract: bin/build <layers-dir> <platform-dir> <buildplan-path>
+# Env vars from the platform are in $PLATFORM_DIR/env/<NAME>.
+set -eo pipefail
+
+LAYERS_DIR=$1
+PLATFORM_DIR=$2
+BUILDPACK_DIR=${CNB_BUILDPACK_DIR:?CNB_BUILDPACK_DIR must be set by the lifecycle}
+BUILD_DIR=$PWD
+
+CACHE_DIR="$LAYERS_DIR/cache"
+mkdir -p "$CACHE_DIR"
+cat > "$LAYERS_DIR/cache.toml" <<EOF
+[types]
+cache = true
+EOF
+
+topic() { echo "-----> $*"; }
+indent() { sed -u 's/^/       /'; }
+
+# --- config ---------------------------------------------------------------
+# Pinned to agent 7.80.2-1 (same as upstream). To change, edit this line.
+# (CNB doesn't inject config vars into the build shell by default.)
+DD_AGENT_VERSION="7.80.2-1"
+APT_DIR="$BUILD_DIR/.apt"
+APT_CACHE_DIR="$CACHE_DIR/apt/cache"
+APT_STATE_DIR="$CACHE_DIR/apt/state"
+DATADOG_APT_KEYRING="$CACHE_DIR/datadog-archive-keyring.gpg"
+APT_REPO_FILE="$BUILDPACK_DIR/etc/datadog7.list"
+APT_OPTIONS="-o debug::nolocking=true -o dir::cache=$APT_CACHE_DIR -o dir::state=$APT_STATE_DIR -o Dir::Etc::SourceList=$APT_REPO_FILE"
+
+# Resolve SIGNED_BY placeholder in the apt source list.
+sed "s|SIGNED_BY_PLACEHOLDER|${DATADOG_APT_KEYRING}|" "$APT_REPO_FILE" > "$CACHE_DIR/datadog.list.resolved"
+APT_OPTIONS="$APT_OPTIONS -o Dir::Etc::SourceList=$CACHE_DIR/datadog.list.resolved"
+
+mkdir -p "$APT_CACHE_DIR/archives/partial" "$APT_STATE_DIR/lists/partial" "$APT_DIR"
+
+# --- GPG keys -------------------------------------------------------------
+topic "Installing Datadog APT repository GPG keys"
+GPG_HOME="$CACHE_DIR/.gnupg"
+mkdir -p "$GPG_HOME"
+touch "$DATADOG_APT_KEYRING"
+for key in DATADOG_APT_KEY_CURRENT.public DATADOG_APT_KEY_06462314.public DATADOG_APT_KEY_C0962C7D.public DATADOG_APT_KEY_F14F620E.public DATADOG_APT_KEY_382E94DE.public; do
+  curl -fsS "https://keys.datadoghq.com/$key" -o "/tmp/$key"
+  gpg --ignore-time-conflict --no-options --no-default-keyring --homedir "$GPG_HOME" --keyring "$DATADOG_APT_KEYRING" --import "/tmp/$key" | indent
+  rm -f "/tmp/$key"
+done
+
+# --- download + extract agent ---------------------------------------------
+topic "Downloading Datadog Agent $DD_AGENT_VERSION"
+apt-get $APT_OPTIONS update | indent
+apt-get $APT_OPTIONS -y -d install --reinstall --no-install-recommends "datadog-agent=1:$DD_AGENT_VERSION" | indent
+
+DEB="$APT_CACHE_DIR/archives/datadog-agent_1%3a${DD_AGENT_VERSION}_amd64.deb"
+topic "Installing Datadog Agent"
+dpkg -x "$DEB" "$APT_DIR"
+
+# --- strip what we don't need (keep slug small) --------------------------
+# No APM, no process agent, no system-probe/security agent, no docs.
+rm -rf "$APT_DIR"/opt/datadog-agent/embedded/bin/trace-agent \
+       "$APT_DIR"/opt/datadog-agent/embedded/bin/process-agent \
+       "$APT_DIR"/opt/datadog-agent/embedded/bin/system-probe \
+       "$APT_DIR"/opt/datadog-agent/embedded/bin/security-agent \
+       "$APT_DIR"/opt/datadog-agent/embedded/bin/clang-bpf \
+       "$APT_DIR"/opt/datadog-agent/embedded/bin/llc-bpf \
+       "$APT_DIR"/opt/datadog-agent/embedded/bin/secret-generic-connector \
+       "$APT_DIR"/opt/datadog-agent/embedded/share/doc \
+       "$APT_DIR"/opt/datadog-agent/embedded/share/man \
+       "$APT_DIR"/opt/datadog-agent/embedded/share/system-probe \
+       "$APT_DIR"/opt/datadog-agent/embedded/sbin/gstatus \
+       "$APT_DIR"/opt/datadog-agent/embedded/nikos \
+       "$APT_DIR"/opt/datadog-agent/sources \
+       "$APT_DIR"/opt/datadog-agent/embedded/lib/libbcc* \
+       "$APT_DIR"/opt/datadog-agent/embedded/lib/*.a \
+       "$APT_DIR"/opt/datadog-agent/embedded/lib/python*/site-packages/Cryptodome/SelfTest \
+       "$APT_DIR"/opt/datadog-agent/embedded/.installed_by_pkg.txt \
+       "$DEB"
+# Keep only the s3 botocore data, drop the rest.
+for d in "$APT_DIR"/opt/datadog-agent/embedded/lib/python*/site-packages/botocore/data/*/; do
+  [ "$(basename "$d")" = "s3" ] || rm -rf "$d"
+done
+
+# --- install runtime files ------------------------------------------------
+topic "Writing .profile.d/datadog.sh"
+mkdir -p "$BUILD_DIR/.profile.d"
+cp "$BUILDPACK_DIR/extra/datadog.sh" "$BUILD_DIR/.profile.d/"
+chmod +x "$BUILD_DIR/.profile.d/datadog.sh"
+
+topic "Installing agent-wrapper"
+mkdir -p "$APT_DIR/opt/datadog-agent/bin/agent"
+cp "$BUILDPACK_DIR/extra/agent-wrapper" "$APT_DIR/opt/datadog-agent/bin/agent/"
+chmod +x "$APT_DIR/opt/datadog-agent/bin/agent/agent-wrapper"
+
+topic "Datadog Agent $DD_AGENT_VERSION installed to $APT_DIR/opt/datadog-agent"
