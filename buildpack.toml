@@ -8,7 +8,7 @@ api = "0.10"
   id = "northflank/datadog-agent"
   name = "Datadog Agent"
   version = "0.1.0"
-  homepage = "https://github.com/northflank/network-debugging/tree/main/datadog-ruby-testapp/datadog-cnb-buildpack"
+  homepage = "https://github.com/nf-testing/datadog-cnb-buildpack"
   description = "Runs the Datadog Agent as a second process inside the container via .profile.d. Forked in spirit from DataDog/heroku-buildpack-datadog (classic), ported to CNB."
 
 # Heroku-24 stack (what Northflank exposes as builder HEROKU_24).
