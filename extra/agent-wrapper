@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
-# Self-contained wrapper so `agent-wrapper status` works from any exec session
-# (re-establishes PYTHONPATH/LD_LIBRARY_PATH the agent binary needs).
+# Self-contained wrapper so `agent-wrapper status` works from any exec session.
+# Re-establishes PYTHONPATH/LD_LIBRARY_PATH the agent binary needs.
+# Tries $HOME/.apt first (Heroku dyno layout); falls back to /workspace/.apt
+# (Northflank CNB layout, where the build dir is /workspace at runtime).
 set -euo pipefail
 
 APT_DIR="$HOME/.apt"
+[ -d "$APT_DIR/opt/datadog-agent" ] || APT_DIR="/workspace/.apt"
 DD_DIR="$APT_DIR/opt/datadog-agent"
 DD_BIN_DIR="$DD_DIR/bin/agent"
 DATADOG_CONF="$APT_DIR/etc/datadog-agent/datadog.yaml"
