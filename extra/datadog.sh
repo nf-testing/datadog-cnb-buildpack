@@ -66,7 +66,11 @@ run() {
   else
     export DD_LOG_FILE="$DD_LOG_DIR/datadog.log"
     echo "[datadog-execd] Starting Datadog Agent on $DD_HOSTNAME"
-    bash -c "PYTHONPATH=\"$PYTHONPATH\" LD_LIBRARY_PATH=\"$LD_LIBRARY_PATH\" $DD_BIN_DIR/agent run -c \"$DATADOG_CONF\" > \"$DD_LOG_FILE\" 2>&1 &"
+    # CRITICAL: close fd 3 in the backgrounded agent. The launcher reads fd 3
+    # until EOF before exec'ing the app; if the agent keeps fd 3 open, the
+    # launcher blocks forever and the app never starts. Also redirect stdin
+    # from /dev/null so the agent doesn't hold the launcher's stdin either.
+    bash -c "PYTHONPATH=\"$PYTHONPATH\" LD_LIBRARY_PATH=\"$LD_LIBRARY_PATH\" $DD_BIN_DIR/agent run -c \"$DATADOG_CONF\" < /dev/null > \"$DD_LOG_FILE\" 2>&1 3>&- &"
   fi
 }
 
