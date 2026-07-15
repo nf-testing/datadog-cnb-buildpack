@@ -59,10 +59,17 @@ run() {
   printf 'DD_HOSTNAME="%s"\n' "$DD_HOSTNAME" >&3
 
   # --- start the agent (or don't) -------------------------------------------
+  # PID file guards against duplicate agent starts: exec.d runs in every shell
+  # session the launcher creates (app start, Northflank SSH sessions, etc.).
+  # Without this guard, every SSH session would spawn another agent.
+  local PID_FILE="$DD_RUN_DIR/agent.pid"
+
   if [ -z "${DD_API_KEY:-}" ]; then
     echo "[datadog-execd] DD_API_KEY not set - agent will not start"
   elif [ -n "${DISABLE_DATADOG_AGENT:-}" ]; then
     echo "[datadog-execd] Datadog Agent disabled via DISABLE_DATADOG_AGENT"
+  elif [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE" 2>/dev/null)" 2>/dev/null; then
+    echo "[datadog-execd] Agent already running (pid $(cat "$PID_FILE")), not starting another"
   else
     export DD_LOG_FILE="$DD_LOG_DIR/datadog.log"
     echo "[datadog-execd] Starting Datadog Agent on $DD_HOSTNAME"
@@ -70,7 +77,9 @@ run() {
     # until EOF before exec'ing the app; if the agent keeps fd 3 open, the
     # launcher blocks forever and the app never starts. Also redirect stdin
     # from /dev/null so the agent doesn't hold the launcher's stdin either.
-    bash -c "PYTHONPATH=\"$PYTHONPATH\" LD_LIBRARY_PATH=\"$LD_LIBRARY_PATH\" $DD_BIN_DIR/agent run -c \"$DATADOG_CONF\" < /dev/null > \"$DD_LOG_FILE\" 2>&1 3>&- &"
+    # --pidfile is passed to the agent AND we echo $! to our own pid file so
+    # the guard above can detect a live agent on subsequent exec.d runs.
+    bash -c "PYTHONPATH=\"$PYTHONPATH\" LD_LIBRARY_PATH=\"$LD_LIBRARY_PATH\" $DD_BIN_DIR/agent run --pidfile=\"$PID_FILE\" -c \"$DATADOG_CONF\" < /dev/null > \"$DD_LOG_FILE\" 2>&1 3>&- &"
   fi
 }
 
